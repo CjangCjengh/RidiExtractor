@@ -5,9 +5,13 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.WorkerThread
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.foundation.*
@@ -28,9 +32,23 @@ import java.io.File
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            MainInterface(this)
+        // Ask for permission to read and write to external storage
+        val requestPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) {
+            if (it) {
+                // Permission granted
+                setContent {
+                    MainInterface(this)
+                }
+            } else {
+                // Permission denied
+                Toast.makeText(this, "Permission denied", Toast.LENGTH_SHORT).show()
+                // Close the app
+                finish()
+            }
         }
+        requestPermissionLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
     }
 }
 
@@ -89,13 +107,16 @@ fun MainInterface(context: Context?) {
                                         settingFile.writeText(storageDirectory.value)
                                     }
                                     catch (e:Exception) { }
-                                    // Extract books
-                                    extractBooks(selected, directory, context)
+                                    // Extract books in a new thread
+                                    val books = selected.toList()
+                                    Thread {
+                                        extractBooks(books, directory, context)
+                                    }.start()
                                     // Close the dialog
-                                    openDialog.value = false
                                     for (book in selected)
                                         book.checked.value = false
                                     selected.clear()
+                                    openDialog.value = false
                                 }) {
                                     Text("OK")
                                 }
@@ -202,6 +223,7 @@ fun BookItem(id: String, cover: File, title: String, author: String, selected: M
     Divider()
 }
 
+@WorkerThread
 fun extractBooks(books: List<Book>, directory: File, context: Context?) {
     val ridiDirectory = "${Environment.getDataDirectory()}/data/com.initialcoms.ridi"
     // Find device id
@@ -211,11 +233,13 @@ fun extractBooks(books: List<Book>, directory: File, context: Context?) {
         deviceId = ridiPreferences.substringAfter("<string name=\"uuid\">").substringBefore("</string>")
     }
     catch (e: Exception) {
-        Toast.makeText(context, "Failed to find device id", Toast.LENGTH_LONG).show()
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(context, "Failed to find device id", Toast.LENGTH_LONG).show()
+        }
         return
     }
     // Extract books
-    for(book in books) {
+    for((index, book) in books.withIndex()) {
         try {
             // Copy book directory
             val bookDirectory = File("$ridiDirectory/files/books/${book.id}")
@@ -238,6 +262,8 @@ fun extractBooks(books: List<Book>, directory: File, context: Context?) {
                     }
                 }
             }
+            // Delete redundant files
+            File("$targetDirectory/OEBPS/Styles/style.css.ridibackup").delete()
             // Zip the book
             val zipFile = File("$directory/${book.name}.epub")
             if (zipFile.exists())
@@ -245,10 +271,15 @@ fun extractBooks(books: List<Book>, directory: File, context: Context?) {
             ZipUtil.pack(targetDirectory, zipFile)
             // Delete the book directory
             targetDirectory.deleteRecursively()
+            // Toast message
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(context, "${book.name} extracted (${index + 1}/${books.size})", Toast.LENGTH_SHORT).show()
+            }
         }
         catch (e: Exception) {
-            Toast.makeText(context, "Failed to extract ${book.name}", Toast.LENGTH_LONG).show()
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(context, "Failed to extract ${book.name}", Toast.LENGTH_LONG).show()
+            }
         }
     }
-    Toast.makeText(context, "Extracted to ${directory.absolutePath}", Toast.LENGTH_LONG).show()
 }
