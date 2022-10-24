@@ -32,6 +32,8 @@ import java.io.File
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Get root permission
+        Runtime.getRuntime().exec("su")
         // Ask for permission to read and write to external storage
         val requestPermissionLauncher = registerForActivityResult(
             ActivityResultContracts.RequestPermission()
