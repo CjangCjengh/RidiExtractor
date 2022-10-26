@@ -250,16 +250,14 @@ fun extractBooks(books: List<Book>, directory: File, context: Context?) {
             contentDirectory.copyRecursively(targetDirectory, true)
             // Get key
             val key = RidiDecrypter.generateKey(deviceId, File("$bookDirectory/${book.id}.dat"))
-            // Decrypt xhtml files
-            val xhtmlFiles =
-                File("$targetDirectory/OEBPS/Text").listFiles()?.filter { it.extension == "xhtml" }
-            if (xhtmlFiles != null) {
-                for (file in xhtmlFiles) {
-                    if (file.extension == "xhtml") {
-                        var text = RidiDecrypter.decryptHtml(file, key)
-                        text = Regex("([\\s\\S])\\1+$").replace(text, "")
-                        file.writeText(text)
-                    }
+            // Decrypt html files
+            val htmlFiles =
+                File("$targetDirectory/OEBPS/Text").listFiles()?.filter { it.extension == "xhtml" || it.extension == "html" }
+            if (htmlFiles != null) {
+                for (file in htmlFiles) {
+                    var text = RidiDecrypter.decryptHtml(file, key)
+                    text = Regex("([\\s\\S])\\1+$").replace(text, "")
+                    file.writeText(text)
                 }
             }
             // Delete redundant files
