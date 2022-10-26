@@ -28,12 +28,11 @@ import androidx.compose.ui.unit.dp
 import com.example.ridiextractor.ui.theme.RidiExtractorTheme
 import org.zeroturnaround.zip.ZipUtil
 import java.io.File
+import java.io.InputStream
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Get root permission
-        Runtime.getRuntime().exec("su")
         // Ask for permission to read and write to external storage
         val requestPermissionLauncher = registerForActivityResult(
             ActivityResultContracts.RequestPermission()
@@ -55,6 +54,12 @@ class MainActivity : ComponentActivity() {
 }
 
 data class Book(val id:String,val name: String,val checked: MutableState<Boolean>)
+
+fun commandLine(command: String): InputStream {
+    val process = Runtime.getRuntime().exec("su 0 $command")
+    process.waitFor()
+    return process.inputStream
+}
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
@@ -157,27 +162,24 @@ fun MainInterface(context: Context?) {
 fun BookList(selected: MutableList<Book>) {
     val ridiDirectory = "${Environment.getDataDirectory()}/data/com.initialcoms.ridi/files"
     // List all book directories
-    val books = File("$ridiDirectory/books").listFiles()
-    if (books != null) {
-        for (book in books){
-            val bookId = book.name
-            // Find book cover
-            val cover = File("$ridiDirectory/covers/$bookId.png")
-            // Find book info
-            val infoFile = File("$book/extracted/OEBPS/content.opf")
-            if (infoFile.exists()) {
-                val info = infoFile.readText(Charsets.UTF_8)
-                val title = info.substringAfter("<dc:title>").substringBefore("</dc:title>")
-                val author = info.substringAfter("<dc:creator opf:role=\"aut\">").substringBefore("</dc:creator>")
-                BookItem(bookId, cover, title, author, selected)
-            }
+    val books = commandLine("ls $ridiDirectory/books").bufferedReader().readLines()
+    for (bookId in books){
+        // Book cover
+        val cover = "$ridiDirectory/covers/$bookId.png"
+        // Read book info
+        val infoFile = "$bookId/extracted/OEBPS/content.opf"
+        val info = commandLine("cat $ridiDirectory/books/$infoFile").bufferedReader().readText()
+        if (info.isNotEmpty()) {
+            val title = info.substringAfter("<dc:title>").substringBefore("</dc:title>")
+            val author = info.substringAfter("<dc:creator opf:role=\"aut\">").substringBefore("</dc:creator>")
+            BookItem(bookId, cover, title, author, selected)
         }
     }
 }
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-fun BookItem(id: String, cover: File, title: String, author: String, selected: MutableList<Book>) {
+fun BookItem(id: String, cover: String, title: String, author: String, selected: MutableList<Book>) {
     val checked = remember { mutableStateOf(false) }
     Row(modifier = Modifier
         .fillMaxWidth()
@@ -208,7 +210,7 @@ fun BookItem(id: String, cover: File, title: String, author: String, selected: M
         Spacer(modifier = Modifier.width(5.dp))
         // Book cover
         Image(
-            bitmap = BitmapFactory.decodeFile(cover.absolutePath)?.asImageBitmap() ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888).asImageBitmap(),
+            bitmap = BitmapFactory.decodeStream(commandLine("cat $cover"))?.asImageBitmap() ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888).asImageBitmap(),
             contentDescription = "Book cover",
             modifier = Modifier
                 .clip(RoundedCornerShape(5.dp))
@@ -231,7 +233,7 @@ fun extractBooks(books: List<Book>, directory: File, context: Context?) {
     // Find device id
     val deviceId: String
     try {
-        val ridiPreferences = File("$ridiDirectory/shared_prefs/com.initialcoms.ridi_preferences.xml").readText()
+        val ridiPreferences = commandLine("cat $ridiDirectory/shared_prefs/com.initialcoms.ridi_preferences.xml").bufferedReader().readText()
         deviceId = ridiPreferences.substringAfter("<string name=\"uuid\">").substringBefore("</string>")
     }
     catch (e: Exception) {
@@ -249,19 +251,17 @@ fun extractBooks(books: List<Book>, directory: File, context: Context?) {
             val targetDirectory = File("$directory/${book.id}")
             if (targetDirectory.exists())
                 targetDirectory.deleteRecursively()
-            contentDirectory.copyRecursively(targetDirectory, true)
+            commandLine("cp -rf $contentDirectory $targetDirectory")
             // Get key
             val key = RidiDecrypter.generateKey(deviceId, File("$bookDirectory/${book.id}.dat"))
-            // Decrypt xhtml files
-            val xhtmlFiles =
-                File("$targetDirectory/OEBPS/Text").listFiles()?.filter { it.extension == "xhtml" }
-            if (xhtmlFiles != null) {
-                for (file in xhtmlFiles) {
-                    if (file.extension == "xhtml") {
-                        var text = RidiDecrypter.decryptHtml(file, key)
-                        text = Regex("([\\s\\S])\\1+$").replace(text, "")
-                        file.writeText(text)
-                    }
+            // Decrypt html files
+            val htmlFiles =
+                File("$targetDirectory/OEBPS/Text").listFiles()?.filter { it.extension == "xhtml" || it.extension == "html" }
+            if (htmlFiles != null) {
+                for (file in htmlFiles) {
+                    var text = RidiDecrypter.decryptHtml(file, key)
+                    text = Regex("([\\s\\S])\\1+$").replace(text, "")
+                    file.writeText(text)
                 }
             }
             // Delete redundant files
