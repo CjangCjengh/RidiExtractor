@@ -252,7 +252,7 @@ fun extractBooks(books: List<Book>, directory: File, context: Context?) {
             val key = RidiDecrypter.generateKey(deviceId, File("$bookDirectory/${book.id}.dat"))
             // Decrypt html files
             val htmlFiles =
-                File("$targetDirectory/OEBPS/Text").listFiles()?.filter { it.extension == "xhtml" || it.extension == "html" }
+                File("$targetDirectory/OEBPS/Text").listFiles()?.filter { it.extension == "xhtml" || it.extension == "html" || it.extension == "htm" }
             if (htmlFiles != null) {
                 for (file in htmlFiles) {
                     var text = RidiDecrypter.decryptHtml(file, key)
